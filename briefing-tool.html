@@ -11,6 +11,7 @@
      internal name "Order0" (Order is reserved) - check Library settings > column > "Field=" in the URL.
   3. Classic page > Edit > Insert > Web Part > Media and Content > Script Editor > Edit snippet >
      paste this whole file. Set CONFIG.library if the library is not called "Briefings".
+  4. Colours: edit the variables at the top of <style>. One --deck-st-* per Status choice (lowercase).
 
   How it works: one GET reads the library's choice values and entity type, one GET reads the
   items. A button loads its deck in the iframe via Doc.aspx?action=embedview. "Edit" turns each
@@ -20,15 +21,23 @@
   (else set CONFIG.site). SharePoint Online or on-prem 2013+.
 -->
 <style>
+  #deck-tool {
+    --deck-active: #0078d4;     /* selected deck */
+    --deck-active-text: #fff;
+    --deck-btn-bg: #f5f5f5;
+    --deck-st-update: #107c10;  /* status stripe per Status choice */
+    --deck-st-verbal: #ffb900;
+    --deck-st-nstr: #ff0000;
+  }
   #deck-tool { display:flex; gap:12px; height:80vh; font:13px "Segoe UI", sans-serif; }
   #deck-nav { width:380px; flex:none; overflow-y:auto; }
   #deck-nav h4 { margin:12px 0 4px; border-bottom:1px solid #ccc; }
   .deck-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
-  .deck-btn { padding:8px; border:1px solid #bbb; border-radius:3px; background:#f5f5f5; text-align:left; cursor:pointer; }
-  .deck-btn.active { background:#0078d4; border-color:#0078d4; color:#fff; }
-  .deck-btn.st-Update { border-left:5px solid #107c10; }
-  .deck-btn.st-Verbal { border-left:5px solid #ffb900; }
-  .deck-btn.st-NSTR { border-left:5px solid #999; }
+  .deck-btn { padding:8px; border:1px solid #bbb; border-radius:3px; background:var(--deck-btn-bg); text-align:left; cursor:pointer; }
+  .deck-btn.active { background:var(--deck-active); border-color:var(--deck-active); color:var(--deck-active-text); }
+  .deck-btn.st-Update { border-left:5px solid var(--deck-st-update); }
+  .deck-btn.st-Verbal { border-left:5px solid var(--deck-st-verbal); }
+  .deck-btn.st-NSTR { border-left:5px solid var(--deck-st-nstr); }
   .deck-btn small { display:block; opacity:.7; }
   .deck-edit { grid-column:1/-1; display:grid; grid-template-columns:2fr 1fr 1fr 55px; gap:4px; }
   #deck-frame { flex:1; border:1px solid #ccc; }
