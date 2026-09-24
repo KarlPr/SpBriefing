@@ -11,7 +11,16 @@
      internal name "Order0" (Order is reserved) - check Library settings > column > "Field=" in the URL.
   3. Classic page > Edit > Insert > Web Part > Media and Content > Script Editor > Edit snippet >
      paste this whole file. Set CONFIG.library if the library is not called "Briefings".
-  4. Colours: edit the variables at the top of <style>
+  4. Colours: edit the variables at the top of the style block. One --deck-st-* per Status choice (lowercase).
+
+  How it works: one GET reads the library's choice values and entity type, one GET reads the
+  items. A button loads its deck in the iframe via WopiFrame.aspx?action=embedview. "Edit" turns each
+  button into title / category / status / order inputs; every change is saved immediately with a
+  MERGE (fresh digest from /_api/contextinfo per save). "Done" re-groups the buttons.
+  Needs: read access to view, edit access to save. Library must be in the same web as the page
+  (else set CONFIG.site). SharePoint Online or on-prem 2013+.
+-->
+<style>
   #deck-tool {
     --deck-active: #0078d4;     /* selected deck */
     --deck-active-text: #fff;
