@@ -43,7 +43,8 @@
   .st-NSTR { background:var(--deck-st-nstr); border-color:var(--deck-st-nstr); color:#fff; }
   .deck-btn.active { border-left-color:var(--deck-active); }
   .deck-btn small { display:block; margin-top:2px; font-size:11px; font-weight:400; opacity:.7; }
-  #deck-edit-toggle { width:100%; border-left-width:1px; text-align:center; color:var(--deck-active); border-color:var(--deck-active); }
+  #deck-bar { display:flex; gap:6px; }
+  #deck-bar .deck-btn { flex:1; border-left-width:1px; text-align:center; color:var(--deck-active); border-color:var(--deck-active); text-decoration:none; }
   .deck-edit { grid-column:1/-1; display:grid; grid-template-columns:2fr 1fr 1fr 55px; gap:6px; }
   .deck-edit input, .deck-edit select { min-width:0; padding:6px 8px; border:1px solid var(--deck-border); border-radius:4px; font:inherit; background:#fff; }
   .deck-edit input:focus, .deck-edit select:focus { outline:none; border-color:var(--deck-active); box-shadow:0 0 0 1px var(--deck-active); }
@@ -54,7 +55,10 @@
 
 <div id="deck-tool">
   <div id="deck-nav">
-    <button type="button" id="deck-edit-toggle" class="deck-btn">Edit</button>
+    <div id="deck-bar">
+      <button type="button" id="deck-edit-toggle" class="deck-btn">Edit</button>
+      <a id="deck-lib" class="deck-btn" target="_blank">Open library</a>
+    </div>
     <div id="deck-legend"></div>
     <div id="deck-err"></div>
     <div id="deck-list">Loading...</div>
@@ -89,8 +93,9 @@
   }
 
   async function load() {
-    var meta = await sp('GET', listUrl + '?$select=ListItemEntityTypeFullName,Fields/InternalName,Fields/Choices&$expand=Fields');
+    var meta = await sp('GET', listUrl + '?$select=ListItemEntityTypeFullName,DefaultViewUrl,Fields/InternalName,Fields/Choices&$expand=Fields');
     state.type = meta.d.ListItemEntityTypeFullName;
+    $('deck-lib').href = meta.d.DefaultViewUrl;
     meta.d.Fields.results.forEach(function (f) { if (f.Choices) state.choices[f.InternalName] = f.Choices.results; });
     $('deck-legend').innerHTML = (state.choices[CONFIG.status] || []).map(function (c) {
       return '<span class="deck-chip st-' + esc(c) + '">' + esc(c) + '</span>';
