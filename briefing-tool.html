@@ -53,7 +53,7 @@
 
 <div id="deck-tool">
   <div id="deck-nav">
-    <button id="deck-edit-toggle" class="deck-btn">Edit</button>
+    <button type="button" id="deck-edit-toggle" class="deck-btn">Edit</button>
     <div id="deck-err"></div>
     <div id="deck-list">Loading...</div>
   </div>
@@ -147,7 +147,7 @@
               '<select data-f="' + CONFIG.status + '">' + options(state.choices[CONFIG.status] || [], it[CONFIG.status]) + '</select>' +
               '<input data-f="' + CONFIG.order + '" type="number" value="' + esc(it[CONFIG.order]) + '">' +
             '</div>'
-          : '<button class="deck-btn st-' + esc(it[CONFIG.status]) + (it.Id === state.activeId ? ' active' : '') +
+          : '<button type="button" class="deck-btn st-' + esc(it[CONFIG.status]) + (it.Id === state.activeId ? ' active' : '') +
               '" data-id="' + it.Id + '">' + esc(title(it)) + '<small>' + esc(it[CONFIG.status]) + '</small></button>';
       }).join('') + '</div>';
     }).join('') || 'No decks found.';
@@ -168,6 +168,9 @@
     if (!f) return;
     var v = e.target.value === '' ? null : e.target.type === 'number' ? Number(e.target.value) : e.target.value;
     save(e.target.closest('[data-id]').dataset.id, f, v);
+  });
+  $('deck-list').addEventListener('keydown', function (e) {  // Enter would submit the SharePoint page form
+    if (e.key === 'Enter' && e.target.dataset.f) { e.preventDefault(); e.target.blur(); }
   });
   $('deck-edit-toggle').addEventListener('click', function () {
     state.editing = !state.editing;
