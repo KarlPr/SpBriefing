@@ -47,6 +47,7 @@
   #deck-bar .deck-btn { flex:1; border-left-width:1px; text-align:center; color:var(--deck-active); border-color:var(--deck-active); text-decoration:none; }
   .deck-edit { grid-column:1/-1; display:grid; grid-template-columns:2fr 1fr 1fr 55px; gap:6px; }
   .deck-edit input, .deck-edit select { min-width:0; padding:6px 8px; border:1px solid var(--deck-border); border-radius:4px; font:inherit; background:#fff; }
+  .deck-head span { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:#605e5c; }
   .deck-edit input:focus, .deck-edit select:focus { outline:none; border-color:var(--deck-active); box-shadow:0 0 0 1px var(--deck-active); }
   #deck-frame { flex:1; border:1px solid var(--deck-border); border-radius:6px; background:#fff; }
   #deck-err { margin-top:8px; color:#a4262c; white-space:pre-wrap; }
@@ -104,8 +105,8 @@
     var data = await sp('GET', listUrl + '/items?$select=Id,Title,FileLeafRef,File/UniqueId,' +
       [CONFIG.status, CONFIG.category, CONFIG.order].join(',') + '&$expand=File&$filter=FSObjType eq 0&$top=500');
     state.items = data.d.results;
-    render();
-    if (state.items.length) show(state.items[0]);
+    var groups = render();
+    if (groups.length) show(groups[0].items[0]);
   }
 
   async function save(id, field, value) {
@@ -149,7 +150,9 @@
   function render() {
     var groups = group(state.items, state.choices[CONFIG.category] || [], CONFIG.category, CONFIG.order);
     $('deck-list').innerHTML = groups.map(function (g) {
-      return '<h4>' + esc(g.name) + '</h4><div class="deck-grid">' + g.items.map(function (it) {
+      return '<h4>' + esc(g.name) + '</h4><div class="deck-grid">' +
+        (state.editing ? '<div class="deck-edit deck-head"><span>Title</span><span>Category</span><span>Status</span><span>Order</span></div>' : '') +
+        g.items.map(function (it) {
         return state.editing
           ? '<div class="deck-edit" data-id="' + it.Id + '">' +
               '<input data-f="Title" value="' + esc(it.Title) + '" placeholder="' + esc(it.FileLeafRef) + '">' +
@@ -161,6 +164,7 @@
               '" data-id="' + it.Id + '">' + esc(title(it)) + '<small>' + esc(it[CONFIG.status]) + '</small></button>';
       }).join('') + '</div>';
     }).join('') || 'No decks found.';
+    return groups;
   }
 
   function show(it) {
