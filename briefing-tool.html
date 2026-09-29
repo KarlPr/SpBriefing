@@ -52,6 +52,16 @@
   #deck-frame { flex:1; border:1px solid var(--deck-border); border-radius:6px; background:#fff; }
   #deck-err { margin-top:8px; color:#a4262c; white-space:pre-wrap; }
   #deck-err:empty { display:none; }
+  .deck-num { display:none; }
+  /* Fullscreen: nav collapses to a numbered strip on the left, shown only on hover */
+  #deck-tool:fullscreen { height:100vh; gap:0; background:#fff; position:relative; }
+  #deck-tool:fullscreen #deck-nav { position:absolute; top:0; bottom:0; left:0; z-index:1; width:44px; padding:6px; border:none; border-radius:0; background:rgba(243,242,241,.95); opacity:0; transition:opacity .2s; }
+  #deck-tool:fullscreen #deck-nav:hover, #deck-tool:fullscreen #deck-nav:focus-within { opacity:1; }
+  #deck-tool:fullscreen :is(h4, #deck-legend, #deck-edit-toggle, #deck-lib, .deck-name, .deck-btn small) { display:none; }
+  #deck-tool:fullscreen .deck-num { display:inline; }
+  #deck-tool:fullscreen .deck-grid { grid-template-columns:1fr; gap:4px; margin-top:4px; }
+  #deck-tool:fullscreen .deck-btn { padding:6px 0; text-align:center; }
+  #deck-tool:fullscreen #deck-frame { border:none; border-radius:0; }
 </style>
 
 <div id="deck-tool">
@@ -59,6 +69,7 @@
     <div id="deck-bar">
       <button type="button" id="deck-edit-toggle" class="deck-btn">Edit</button>
       <a id="deck-lib" class="deck-btn" target="_blank">Open library</a>
+      <button type="button" id="deck-max" class="deck-btn" title="Fullscreen">&#x26F6;</button>
     </div>
     <div id="deck-legend"></div>
     <div id="deck-err"></div>
@@ -148,7 +159,7 @@
   }
 
   function render() {
-    var groups = group(state.items, state.choices[CONFIG.category] || [], CONFIG.category, CONFIG.order);
+    var groups = group(state.items, state.choices[CONFIG.category] || [], CONFIG.category, CONFIG.order), n = 0;
     $('deck-list').innerHTML = groups.map(function (g) {
       return '<h4>' + esc(g.name) + '</h4><div class="deck-grid">' +
         (state.editing ? '<div class="deck-edit deck-head"><span>Title</span><span>Category</span><span>Status</span><span>Order</span></div>' : '') +
@@ -161,7 +172,7 @@
               '<input data-f="' + CONFIG.order + '" type="number" value="' + esc(it[CONFIG.order]) + '">' +
             '</div>'
           : '<button type="button" class="deck-btn st-' + esc(it[CONFIG.status]) + (it.Id === state.activeId ? ' active' : '') +
-              '" data-id="' + it.Id + '">' + esc(title(it)) + '<small>' + esc(it[CONFIG.status]) + '</small></button>';
+              '" data-id="' + it.Id + '" title="' + esc(title(it)) + '"><span class="deck-num">' + (++n) + '</span><span class="deck-name">' + esc(title(it)) + '</span><small>' + esc(it[CONFIG.status]) + '</small></button>';
       }).join('') + '</div>';
     }).join('') || 'No decks found.';
     return groups;
@@ -190,6 +201,15 @@
     state.editing = !state.editing;
     $('deck-edit-toggle').textContent = state.editing ? 'Done' : 'Edit';
     render();
+  });
+
+  $('deck-max').addEventListener('click', function () {
+    if (document.fullscreenElement) return document.exitFullscreen();
+    if (state.editing) $('deck-edit-toggle').click();
+    $('deck-tool').requestFullscreen();
+  });
+  document.addEventListener('fullscreenchange', function () {
+    $('deck-max').innerHTML = document.fullscreenElement ? '&#x2715;' : '&#x26F6;';
   });
 
   load().catch(function (err) { $('deck-err').textContent = 'Load failed: ' + err.message; });
