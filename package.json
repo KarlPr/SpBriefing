@@ -1,0 +1,7 @@
+{
+  "name": "spbriefing",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": { "@office-kit/pptx": "0.21.0", "esbuild": "^0.25.0" }
+}

@@ -1,0 +1,271 @@
+<!--
+  Briefing Deck Switcher - SharePoint Script Editor web part
+  ==========================================================
+  README
+  1. Create a document library (default title "Briefings") and upload the .pptx decks.
+  2. Add three columns to the library:
+       Status    - Choice: Update, Verbal, NSTR
+       Category  - Choice: one entry per section. Choice order = order on screen.
+       SortOrder - Number: order inside a category (blank sorts last).
+     Use *internal* column names in CONFIG below. A column created as "Order" gets the
+     internal name "Order0" (Order is reserved) - check Library settings > column > "Field=" in the URL.
+  3. Classic page > Edit > Insert > Web Part > Media and Content > Script Editor > Edit snippet >
+     paste this whole file. Set CONFIG.library if the library is not called "Briefings".
+  4. Colours: edit the variables at the top of the style block. One --deck-st-* per Status choice (lowercase).
+
+  How it works: one GET reads the library's choice values and entity type, one GET reads the
+  items. A button loads its deck in the iframe via WopiFrame.aspx?action=embedview. "Edit" turns each
+  button into title / category / status / order inputs; every change is saved immediately with a
+  MERGE (fresh digest from /_api/contextinfo per save). "Done" re-groups the buttons.
+  "Archive" merges every deck (screen order) into one .pptx with @office-kit/pptx (MIT, bundled inline
+  below - no network needed) and downloads it. Decks must
+  share a master: each slide is rebound to the layout of the same name in the first deck. Dropped
+  on merge: speaker notes, charts, embedded objects, comments.
+  Build: `npm install && npm run build` bundles src/officekit.js into src/briefing-tool.html -> briefing-tool.html.
+  Needs: read access to view, edit access to save. Library must be in the same web as the page
+  (else set CONFIG.site). SharePoint Online or on-prem 2013+.
+-->
+<style>
+  #deck-tool {
+    --deck-active: #0078d4;     /* selected deck stripe */
+    --deck-btn-bg: #fff;
+    --deck-border: #d1d1d1;
+    --deck-st-update: #107c10;  /* button fill per Status choice */
+    --deck-st-verbal: #ffb900;
+    --deck-st-nstr: #ff0000;
+  }
+  #deck-tool { display:flex; gap:16px; height:80vh; font:14px/1.4 "Segoe UI", sans-serif; color:#323130; }
+  #deck-nav { width:380px; flex:none; overflow-y:auto; padding:12px; background:#f3f2f1; border:1px solid var(--deck-border); border-radius:6px; }
+  #deck-nav h4 { margin:16px 0 6px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:#605e5c; }
+  .deck-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .deck-btn { padding:10px 12px; border:1px solid var(--deck-border); border-left:5px solid transparent; border-radius:6px; background:var(--deck-btn-bg); color:inherit; font:inherit; font-weight:600; text-align:left; cursor:pointer; transition:box-shadow .15s, transform .15s; }
+  .deck-btn:hover { box-shadow:0 2px 6px rgba(0,0,0,.15); transform:translateY(-1px); }
+  .deck-btn:focus-visible { outline:2px solid var(--deck-active); outline-offset:2px; }
+  #deck-legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .deck-chip { padding:2px 10px; border:1px solid var(--deck-border); border-radius:10px; background:var(--deck-btn-bg); font-size:11px; font-weight:600; }
+  .st-Update { background:var(--deck-st-update); border-color:var(--deck-st-update); color:#fff; }
+  .st-Verbal { background:var(--deck-st-verbal); border-color:var(--deck-st-verbal); color:#323130; }
+  .st-NSTR { background:var(--deck-st-nstr); border-color:var(--deck-st-nstr); color:#fff; }
+  .deck-btn.active { border-left-color:var(--deck-active); }
+  .deck-btn small { display:block; margin-top:2px; font-size:11px; font-weight:400; opacity:.7; }
+  #deck-bar { display:flex; gap:6px; }
+  #deck-bar .deck-btn { flex:1; border-left-width:1px; text-align:center; color:var(--deck-active); border-color:var(--deck-active); text-decoration:none; }
+  .deck-edit { grid-column:1/-1; display:grid; grid-template-columns:2fr 1fr 1fr 55px; gap:6px; }
+  .deck-edit input, .deck-edit select { min-width:0; padding:6px 8px; border:1px solid var(--deck-border); border-radius:4px; font:inherit; background:#fff; }
+  .deck-head span { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:#605e5c; }
+  .deck-edit input:focus, .deck-edit select:focus { outline:none; border-color:var(--deck-active); box-shadow:0 0 0 1px var(--deck-active); }
+  #deck-frame { flex:1; border:1px solid var(--deck-border); border-radius:6px; background:#fff; }
+  #deck-err { margin-top:8px; color:#a4262c; white-space:pre-wrap; }
+  #deck-err:empty { display:none; }
+  .deck-num { display:none; }
+  /* Fullscreen: nav collapses to a numbered strip on the left, shown only on hover */
+  #deck-tool:fullscreen { height:100vh; gap:0; background:#fff; position:relative; }
+  #deck-tool:fullscreen #deck-nav { position:absolute; top:0; bottom:0; left:0; z-index:1; box-sizing:border-box; width:48px; padding:8px; border:none; border-radius:0; background:rgba(32,31,30,.85); scrollbar-width:none; opacity:0; transition:opacity .2s; }
+  #deck-tool:fullscreen #deck-nav:hover { opacity:1; }
+  #deck-tool:fullscreen #deck-nav:has(:focus-visible) { opacity:1; }  /* keyboard only - a clicked button must not pin the strip open */
+  #deck-tool:fullscreen :is(#deck-legend, #deck-edit-toggle, #deck-lib, #deck-archive, .deck-name, .deck-btn small) { display:none; }
+  #deck-tool:fullscreen .deck-num { display:inline; }
+  #deck-tool:fullscreen h4 { height:1px; margin:8px 4px; font-size:0; background:rgba(255,255,255,.3); }  /* category divider */
+  #deck-tool:fullscreen .deck-grid { grid-template-columns:32px; gap:6px; }
+  /* min-width + margin undo SharePoint's global button styles, which stretched the buttons past the strip */
+  #deck-tool:fullscreen .deck-btn { flex:none; box-sizing:border-box; width:32px; min-width:0; height:32px; margin:0; padding:0; border:none; font-size:13px; line-height:32px; text-align:center; }
+  #deck-tool:fullscreen .deck-btn.active { box-shadow:0 0 0 2px #201f1e, 0 0 0 4px #fff; }
+  #deck-tool:fullscreen #deck-max { background:none; color:#fff; font-size:16px; }
+  #deck-tool:fullscreen #deck-frame { border:none; border-radius:0; }
+</style>
+
+<div id="deck-tool">
+  <div id="deck-nav">
+    <div id="deck-bar">
+      <button type="button" id="deck-edit-toggle" class="deck-btn">Edit</button>
+      <a id="deck-lib" class="deck-btn" target="_blank">Open library</a>
+      <button type="button" id="deck-archive" class="deck-btn" title="Merge all decks into one .pptx and download">Archive</button>
+      <button type="button" id="deck-max" class="deck-btn" title="Fullscreen">&#x26F6;</button>
+    </div>
+    <div id="deck-legend"></div>
+    <div id="deck-err"></div>
+    <div id="deck-list">Loading...</div>
+  </div>
+  <iframe id="deck-frame"></iframe>
+</div>
+
+<script>
+/*! OFFICEKIT */
+</script>
+
+<script>
+(function () {
+  var CONFIG = {
+    library: 'Briefings',   // document library title
+    status: 'Status',       // internal column names
+    category: 'Category',
+    order: 'SortOrder',
+    site: window._spPageContextInfo && _spPageContextInfo.webAbsoluteUrl,
+  };
+
+  var JSON_V = 'application/json;odata=verbose';
+  var listUrl = CONFIG.site + "/_api/web/lists/getbytitle('" + encodeURIComponent(CONFIG.library) + "')";
+  var state = { items: [], choices: {}, type: '', editing: false, activeId: null };
+  function $(id) { return document.getElementById(id); }
+
+  // ponytail: no digest cache or retries - a handful of writes per session, fetch a digest per save
+  async function sp(method, url, body, extraHeaders) {
+    var res = await fetch(url, {
+      method: method, credentials: 'include',
+      headers: Object.assign({ Accept: JSON_V, 'Content-Type': JSON_V }, extraHeaders),
+      body: body && JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(res.status + ' ' + (await res.text()).slice(0, 300));
+    return res.status === 204 ? null : res.json();
+  }
+
+  async function load() {
+    var meta = await sp('GET', listUrl + '?$select=ListItemEntityTypeFullName,DefaultViewUrl,Fields/InternalName,Fields/Choices&$expand=Fields');
+    state.type = meta.d.ListItemEntityTypeFullName;
+    $('deck-lib').href = meta.d.DefaultViewUrl;
+    meta.d.Fields.results.forEach(function (f) { if (f.Choices) state.choices[f.InternalName] = f.Choices.results; });
+    $('deck-legend').innerHTML = (state.choices[CONFIG.status] || []).map(function (c) {
+      return '<span class="deck-chip st-' + esc(c) + '">' + esc(c) + '</span>';
+    }).join('');
+
+    var data = await sp('GET', listUrl + '/items?$select=Id,Title,FileLeafRef,File/UniqueId,' +
+      [CONFIG.status, CONFIG.category, CONFIG.order].join(',') + '&$expand=File&$filter=FSObjType eq 0&$top=500');
+    state.items = data.d.results;
+    var groups = render();
+    if (groups.length) show(groups[0].items[0]);
+  }
+
+  async function save(id, field, value) {
+    try {
+      var ctx = await sp('POST', CONFIG.site + '/_api/contextinfo');
+      var body = { __metadata: { type: state.type } };
+      body[field] = value;
+      await sp('POST', listUrl + '/items(' + id + ')', body, {
+        'X-RequestDigest': ctx.d.GetContextWebInformation.FormDigestValue,
+        'X-HTTP-Method': 'MERGE', 'If-Match': '*',
+      });
+      state.items.find(function (it) { return it.Id == id; })[field] = value;
+      $('deck-err').textContent = '';
+    } catch (err) { $('deck-err').textContent = 'Save failed: ' + err.message; }
+  }
+
+  // Merge all decks (screen order) into one .pptx and download it.
+  async function archive() {
+    var btn = $('deck-archive'), items = group(state.items, state.choices[CONFIG.category] || [], CONFIG.category, CONFIG.order)
+      .flatMap(function (g) { return g.items; });
+    if (!items.length) return;
+    btn.disabled = true;
+    try {
+      var k = OfficeKitPptx;
+      var deck = async function (it) {
+        var res = await fetch(CONFIG.site + "/_api/web/GetFileById('" + it.File.UniqueId + "')/$value", { credentials: 'include' });
+        if (!res.ok) throw new Error(it.FileLeafRef + ': HTTP ' + res.status);
+        try { return await k.loadPresentation(await res.arrayBuffer()); }
+        catch (err) { err.message = it.FileLeafRef + ': ' + err.message; throw err; }
+      };
+      var target = await deck(items[0]);
+      // Same master everywhere: rebind each slide to the target's layout of the same name, else its first layout.
+      var pick = function (s) {
+        var l = k.getSlideLayout(s);
+        return (l && k.findSlideLayout(target, k.getSlideLayoutName(l))) || k.getSlideLayouts(target)[0];
+      };
+      for (var i = 1; i < items.length; i++) {
+        btn.textContent = 'Merging ' + (i + 1) + '/' + items.length;
+        var src = await deck(items[i]);
+        try { k.mergePresentations(target, src, pick); }
+        catch (err) { err.message = items[i].FileLeafRef + ' (merge): ' + err.message; throw err; }
+      }
+      var blob = new Blob([await k.savePresentation(target)], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'Briefing ' + new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '') + '.pptx';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      $('deck-err').textContent = '';
+    } catch (err) { $('deck-err').textContent = 'Archive failed: ' + err.message; }
+    btn.disabled = false; btn.textContent = 'Archive';
+  }
+
+  // Groups items by category in choice order; unknown/blank categories last, blank order sorts last.
+  function group(items, cats, catField, orderField) {
+    var by = {};
+    items.forEach(function (it) { var c = it[catField] || ''; (by[c] = by[c] || []).push(it); });
+    var names = cats.filter(function (c) { return by[c]; })
+      .concat(Object.keys(by).filter(function (c) { return cats.indexOf(c) < 0; }));
+    var ord = function (it) { return it[orderField] == null ? Infinity : it[orderField]; };
+    return names.map(function (n) {
+      return { name: n || 'Uncategorised', items: by[n].sort(function (a, b) { return ord(a) - ord(b); }) };
+    });
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function title(it) { return it.Title || it.FileLeafRef.replace(/\.[^.]+$/, ''); }
+  function options(list, cur) {
+    return '<option value="">-</option>' + list.map(function (v) {
+      return '<option' + (v === cur ? ' selected' : '') + '>' + esc(v) + '</option>';
+    }).join('');
+  }
+
+  function render() {
+    var groups = group(state.items, state.choices[CONFIG.category] || [], CONFIG.category, CONFIG.order), n = 0;
+    $('deck-list').innerHTML = groups.map(function (g) {
+      return '<h4>' + esc(g.name) + '</h4><div class="deck-grid">' +
+        (state.editing ? '<div class="deck-edit deck-head"><span>Title</span><span>Category</span><span>Status</span><span>Order</span></div>' : '') +
+        g.items.map(function (it) {
+        return state.editing
+          ? '<div class="deck-edit" data-id="' + it.Id + '">' +
+              '<input data-f="Title" value="' + esc(it.Title) + '" placeholder="' + esc(it.FileLeafRef) + '">' +
+              '<select data-f="' + CONFIG.category + '">' + options(state.choices[CONFIG.category] || [], it[CONFIG.category]) + '</select>' +
+              '<select data-f="' + CONFIG.status + '">' + options(state.choices[CONFIG.status] || [], it[CONFIG.status]) + '</select>' +
+              '<input data-f="' + CONFIG.order + '" type="number" value="' + esc(it[CONFIG.order]) + '">' +
+            '</div>'
+          : '<button type="button" class="deck-btn st-' + esc(it[CONFIG.status]) + (it.Id === state.activeId ? ' active' : '') +
+              '" data-id="' + it.Id + '" title="' + esc(title(it)) + '"><span class="deck-num">' + (++n) + '</span><span class="deck-name">' + esc(title(it)) + '</span><small>' + esc(it[CONFIG.status]) + '</small></button>';
+      }).join('') + '</div>';
+    }).join('') || 'No decks found.';
+    return groups;
+  }
+
+  function show(it) {
+    state.activeId = it.Id;
+    $('deck-frame').src = CONFIG.site + '/_layouts/15/WopiFrame.aspx?sourcedoc={' + it.File.UniqueId + '}&action=embedview&wdAr=1.7777777777777777';
+    render();
+  }
+
+  $('deck-list').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-id]');
+    if (b) show(state.items.find(function (it) { return it.Id == b.dataset.id; }));
+  });
+  $('deck-list').addEventListener('change', function (e) {
+    var f = e.target.dataset.f;
+    if (!f) return;
+    var v = e.target.value === '' ? null : e.target.type === 'number' ? Number(e.target.value) : e.target.value;
+    save(e.target.closest('[data-id]').dataset.id, f, v);
+  });
+  $('deck-list').addEventListener('keydown', function (e) {  // Enter would submit the SharePoint page form
+    if (e.key === 'Enter' && e.target.dataset.f) { e.preventDefault(); e.target.blur(); }
+  });
+  $('deck-edit-toggle').addEventListener('click', function () {
+    state.editing = !state.editing;
+    $('deck-edit-toggle').textContent = state.editing ? 'Done' : 'Edit';
+    render();
+  });
+
+  $('deck-archive').addEventListener('click', archive);
+
+  $('deck-max').addEventListener('click', function () {
+    if (document.fullscreenElement) return document.exitFullscreen();
+    if (state.editing) $('deck-edit-toggle').click();
+    $('deck-tool').requestFullscreen();
+  });
+  document.addEventListener('fullscreenchange', function () {
+    $('deck-max').innerHTML = document.fullscreenElement ? '&#x2715;' : '&#x26F6;';
+  });
+
+  load().catch(function (err) { $('deck-err').textContent = 'Load failed: ' + err.message; });
+})();
+</script>
