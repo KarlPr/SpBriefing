@@ -18,9 +18,9 @@
   button into title / category / status / order inputs; every change is saved immediately with a
   MERGE (fresh digest from /_api/contextinfo per save). "Done" re-groups the buttons.
   "Archive" merges every deck (screen order) into one .pptx with @office-kit/pptx (MIT, bundled inline
-  below - no network needed) and uploads it to CONFIG.archive (created if missing; its parent must exist). Decks must
+  below - no network needed) and uploads it to the root of the CONFIG.archive library (must exist). Decks must
   share a master: each slide is rebound to the layout of the same name in the first deck. Dropped
-  on merge: speaker notes, charts, embedded objects, comments. Files in subfolders are not listed.
+  on merge: speaker notes, charts, embedded objects, comments.
   Rebuild the bundle: echo 'export {loadPresentation,mergePresentations,savePresentation,getSlideLayout,
   getSlideLayoutName,findSlideLayout,getSlideLayouts} from "@office-kit/pptx"' > e.js && npm i @office-kit/pptx@0.21.0
   esbuild && npx esbuild e.js --bundle --format=iife --global-name=OfficeKitPptx --minify --legal-comments=none
@@ -81,7 +81,7 @@
     <div id="deck-bar">
       <button type="button" id="deck-edit-toggle" class="deck-btn">Edit</button>
       <a id="deck-lib" class="deck-btn" target="_blank">Open library</a>
-      <button type="button" id="deck-archive" class="deck-btn" title="Merge all decks into one .pptx in the Archive folder">Archive</button>
+      <button type="button" id="deck-archive" class="deck-btn" title="Merge all decks into one .pptx in the archive library">Archive</button>
       <button type="button" id="deck-max" class="deck-btn" title="Fullscreen">&#x26F6;</button>
     </div>
     <div id="deck-legend"></div>
@@ -108,13 +108,13 @@ var OfficeKitPptx=(()=>{var Jt=Object.defineProperty;var kn=Object.getOwnPropert
     status: 'Status',       // internal column names
     category: 'Category',
     order: 'SortOrder',
-    archive: 'Archive',     // folder for merged decks: server-relative path ('/sites/x/Shared Documents/Archive') or a subfolder of the library
+    archive: 'Archive',     // document library title for merged decks
     site: window._spPageContextInfo && _spPageContextInfo.webAbsoluteUrl,
   };
 
   var JSON_V = 'application/json;odata=verbose';
   var listUrl = CONFIG.site + "/_api/web/lists/getbytitle('" + encodeURIComponent(CONFIG.library) + "')";
-  var state = { items: [], choices: {}, type: '', root: '', editing: false, activeId: null };
+  var state = { items: [], choices: {}, type: '', editing: false, activeId: null };
   function $(id) { return document.getElementById(id); }
 
   // ponytail: no digest cache or retries - a handful of writes per session, fetch a digest per save
@@ -129,9 +129,8 @@ var OfficeKitPptx=(()=>{var Jt=Object.defineProperty;var kn=Object.getOwnPropert
   }
 
   async function load() {
-    var meta = await sp('GET', listUrl + '?$select=ListItemEntityTypeFullName,DefaultViewUrl,RootFolder/ServerRelativeUrl,Fields/InternalName,Fields/Choices&$expand=Fields,RootFolder');
+    var meta = await sp('GET', listUrl + '?$select=ListItemEntityTypeFullName,DefaultViewUrl,Fields/InternalName,Fields/Choices&$expand=Fields');
     state.type = meta.d.ListItemEntityTypeFullName;
-    state.root = meta.d.RootFolder.ServerRelativeUrl;
     $('deck-lib').href = meta.d.DefaultViewUrl;
     meta.d.Fields.results.forEach(function (f) { if (f.Choices) state.choices[f.InternalName] = f.Choices.results; });
     $('deck-legend').innerHTML = (state.choices[CONFIG.status] || []).map(function (c) {
@@ -139,7 +138,7 @@ var OfficeKitPptx=(()=>{var Jt=Object.defineProperty;var kn=Object.getOwnPropert
     }).join('');
 
     var data = await sp('GET', listUrl + '/items?$select=Id,Title,FileLeafRef,File/UniqueId,' +
-      [CONFIG.status, CONFIG.category, CONFIG.order].join(',') + '&$expand=File&$filter=FSObjType eq 0 and FileDirRef eq \'' + state.root + '\'&$top=500');
+      [CONFIG.status, CONFIG.category, CONFIG.order].join(',') + '&$expand=File&$filter=FSObjType eq 0&$top=500');
     state.items = data.d.results;
     var groups = render();
     if (groups.length) show(groups[0].items[0]);
@@ -184,8 +183,7 @@ var OfficeKitPptx=(()=>{var Jt=Object.defineProperty;var kn=Object.getOwnPropert
       var out = await k.savePresentation(target);
       var ctx = await sp('POST', CONFIG.site + '/_api/contextinfo');
       var digest = { 'X-RequestDigest': ctx.d.GetContextWebInformation.FormDigestValue };
-      var folder = CONFIG.archive.charAt(0) === '/' ? CONFIG.archive : state.root + '/' + CONFIG.archive;
-      await sp('POST', CONFIG.site + '/_api/web/folders/add(\'' + folder + '\')', null, digest);  // no-op if it exists
+      var folder = (await sp('GET', CONFIG.site + "/_api/web/lists/getbytitle('" + encodeURIComponent(CONFIG.archive) + "')/RootFolder?$select=ServerRelativeUrl")).d.ServerRelativeUrl;
       var name = 'Briefing ' + new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '') + '.pptx';
       var res = await fetch(CONFIG.site + "/_api/web/GetFolderByServerRelativeUrl('" + folder + "')/Files/add(url='" + name + "',overwrite=true)", {
         method: 'POST', credentials: 'include', body: out, headers: Object.assign({ Accept: JSON_V }, digest),
